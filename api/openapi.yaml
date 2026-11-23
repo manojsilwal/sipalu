@@ -1,0 +1,621 @@
+openapi: 3.1.0
+info:
+  title: Sipalu Marketplace & Operations API
+  version: 2.0.0
+  description: >
+    Unified OpenAPI 3.1 contract for Sipalu (Customer Web/App, Provider App, and Ops/Admin Portal)
+    supporting Hybrid Booking (Instant Rate-Card + Live Competitive Bidding), Biometric KYC + Active Liveness,
+    Automated Calendar Conflict Locking, Dual-Side GPS Privacy, Escrow & Cash-Float Ledger, 48h Disputes,
+    30-Day Warranties, and Priority-0 SOS Safety.
+servers:
+  - url: https://api.sipalu.com/v1
+    description: Production (Azure Front Door + APIM — Central India)
+  - url: https://api-pilot.sipalu.com/v1
+    description: Phase 1 Pilot (Banepa & Kathmandu Valley)
+
+tags:
+  - name: Auth
+  - name: BiometricKYC
+  - name: Catalog
+  - name: BookingsAndBidding
+  - name: ProviderCalendar
+  - name: ExecutionAndComms
+  - name: PaymentsEscrowPayouts
+  - name: TrustWarrantySOS
+  - name: AdminOps
+
+security:
+  - BearerAuth: []
+
+paths:
+  /auth/otp/request:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Request SMS OTP for customer or provider login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone_e164]
+              properties:
+                phone_e164:
+                  type: string
+                  example: "+9779801888282"
+                locale:
+                  type: string
+                  enum: [en, ne]
+                  default: en
+      responses:
+        '202':
+          description: OTP dispatched via Azure Communication Services / local SMS gateway
+
+  /auth/otp/verify:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Verify OTP and issue JWT access/refresh tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone_e164, otp_code]
+              properties:
+                phone_e164: { type: string }
+                otp_code: { type: string, minLength: 6, maxLength: 6 }
+      responses:
+        '200':
+          description: Authenticated session tokens and user profile
+
+  /providers/kyc/liveness-session:
+    post:
+      tags: [BiometricKYC]
+      summary: Create Azure AI Vision Face Active Liveness session for KYC or periodic random selfie re-check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purpose]
+              properties:
+                purpose:
+                  type: string
+                  enum: [INITIAL_KYC, RANDOM_SELFIE_RECHECK]
+      responses:
+        '201':
+          description: Liveness session token & short-lived SAS upload URLs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id: { type: string }
+                  auth_token: { type: string }
+                  upload_urls:
+                    type: object
+                    properties:
+                      doc_front_sas: { type: string, format: uri }
+                      doc_back_sas: { type: string, format: uri }
+                      selfie_sas: { type: string, format: uri }
+
+  /providers/kyc/submit:
+    post:
+      tags: [BiometricKYC]
+      summary: Submit Citizenship/National ID, biometric liveness session, and mandatory bank/eSewa account linking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KycSubmissionRequest'
+      responses:
+        '201':
+          description: KYC queued for automated Face match and Admin review
+
+  /catalog/search:
+    get:
+      tags: [Catalog]
+      security: []
+      summary: Natural-language symptom search & faceted catalog query (Azure AI Search)
+      parameters:
+        - name: zone_code
+          in: query
+          required: true
+          schema: { type: string, example: BANEPA }
+        - name: q
+          in: query
+          description: Natural language symptom in EN or Nepali (e.g. "pani motor chaldaina", "kitchen tap leaking")
+          schema: { type: string }
+        - name: category_slug
+          in: query
+          schema: { type: string }
+        - name: min_rating
+          in: query
+          schema: { type: number, minimum: 1, maximum: 5 }
+      responses:
+        '200':
+          description: Ranked matching service SKUs with pricing mode (INSTANT_FIXED / LIVE_BIDDING / HYBRID)
+
+  /bookings:
+    post:
+      tags: [BookingsAndBidding]
+      summary: Create a Hybrid Booking (Instant Fixed-Price <60s OR Live Bidding 10-15m window)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBookingRequest'
+      responses:
+        '201':
+          description: Booking created; broadcast started to conflict-free nearby verified providers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingSummary'
+
+  /bookings/{bookingId}/bids:
+    get:
+      tags: [BookingsAndBidding]
+      summary: List live competitive bids for a booking (homeowner comparison view)
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      responses:
+        '200':
+          description: Active bids with provider rating, verified badge, completed count, ETA, and price
+    post:
+      tags: [BookingsAndBidding]
+      summary: Submit a live bid as a verified, conflict-free technician
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitBidRequest'
+      responses:
+        '201':
+          description: Bid accepted and pushed live to homeowner via Azure Web PubSub
+        '409':
+          description: Calendar conflict detected, bidding window closed, or edit limit exceeded
+
+  /bookings/{bookingId}/bids/{bidId}/accept:
+    post:
+      tags: [BookingsAndBidding]
+      summary: Homeowner accepts winning bid — locks provider calendar (GiST), unlocks exact address, initiates Escrow if applicable
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+        - name: bidId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Booking moved to SCHEDULED_LOCKED; exact address unlocked for winning provider
+
+  /providers/me/calendar:
+    get:
+      tags: [ProviderCalendar]
+      summary: Retrieve automated locked calendar slots and availability state
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Provider schedule blocks including travel buffers
+
+  /providers/me/availability:
+    patch:
+      tags: [ProviderCalendar]
+      summary: Toggle provider availability state (enforces random selfie re-check when due)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [availability_state]
+              properties:
+                availability_state:
+                  type: string
+                  enum: [AVAILABLE, OFFLINE]
+                lat: { type: number }
+                lng: { type: number }
+      responses:
+        '200':
+          description: State updated in PostgreSQL and Redis GeoHash
+        '428':
+          description: Random selfie liveness re-check required before going AVAILABLE
+
+  /bookings/{bookingId}/status:
+    post:
+      tags: [ExecutionAndComms]
+      summary: Transition job execution state (EN_ROUTE, ARRIVED, IN_PROGRESS, PAUSED, COMPLETED_PENDING_CONFIRM) with offline timestamp support
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to_status]
+              properties:
+                to_status:
+                  type: string
+                  enum: [EN_ROUTE, ARRIVED, IN_PROGRESS, PAUSED, COMPLETED_PENDING_CONFIRM, CANCELLED]
+                lat: { type: number }
+                lng: { type: number }
+                offline_recorded_at: { type: string, format: date-time }
+                photo_blob_paths:
+                  type: array
+                  items: { type: string }
+                cancellation_reason: { type: string }
+      responses:
+        '200':
+          description: Status recorded; GPS/Web PubSub or Anti-Leakage check triggered as applicable
+
+  /bookings/{bookingId}/change-orders:
+    post:
+      tags: [ExecutionAndComms]
+      summary: Technician proposes on-site scope or MRP spare-parts Change Order
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeOrderRequest'
+      responses:
+        '201':
+          description: Change order pushed to homeowner for explicit in-app approval
+
+  /bookings/{bookingId}/change-orders/{changeOrderId}/respond:
+    post:
+      tags: [ExecutionAndComms]
+      summary: Homeowner approves or rejects on-site Change Order
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+        - name: changeOrderId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [APPROVE, REJECT] }
+      responses:
+        '200':
+          description: Change order finalized and booking invoice total updated
+
+  /bookings/{bookingId}/masked-call:
+    post:
+      tags: [ExecutionAndComms]
+      summary: Initiate masked VoIP/PSTN call via Azure Communication Services without exposing personal numbers
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      responses:
+        '201':
+          description: ACS call token / proxy bridge details returned
+
+  /payments/initiate:
+    post:
+      tags: [PaymentsEscrowPayouts]
+      summary: Initiate payment or Escrow funding (eSewa, Khalti, Fonepay QR, ConnectIPS, Cash)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [booking_id, payment_method, amount_npr]
+              properties:
+                booking_id: { type: string, format: uuid }
+                payment_method:
+                  type: string
+                  enum: [CASH, ESEWA, KHALTI, FONEPAY_QR, CONNECT_IPS, CARD]
+                amount_npr: { type: number, minimum: 1 }
+                is_escrow_hold: { type: boolean, default: false }
+                promo_code: { type: string }
+                redeem_loyalty_points: { type: integer, minimum: 0 }
+      responses:
+        '201':
+          description: Gateway checkout payload or cash ledger settlement initiated
+
+  /payments/webhooks/{gateway}:
+    post:
+      tags: [PaymentsEscrowPayouts]
+      security: []
+      summary: Verified server-to-server payment webhook endpoint (eSewa / Khalti / Fonepay / ConnectIPS)
+      parameters:
+        - name: gateway
+          in: path
+          required: true
+          schema: { type: string, enum: [esewa, khalti, fonepay, connectips] }
+      responses:
+        '200':
+          description: Cryptographically verified and posted idempotently to double-entry ledger
+
+  /bookings/{bookingId}/escrow/release:
+    post:
+      tags: [PaymentsEscrowPayouts]
+      summary: Homeowner releases Escrow funds via confirmation / OTP
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [completion_otp]
+              properties:
+                completion_otp: { type: string }
+                tip_npr: { type: number, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Escrow released; commission deducted on labor only; VAT PDF invoice generated
+
+  /providers/me/payouts:
+    post:
+      tags: [PaymentsEscrowPayouts]
+      summary: Request Instant (2h, NPR 25 fee) or inspect scheduled Same-Day/Weekly payouts
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cadence, amount_npr, destination_rail]
+              properties:
+                cadence: { type: string, enum: [INSTANT_2H, SAME_DAY_BATCH, WEEKLY_BANK] }
+                amount_npr: { type: number, minimum: 100 }
+                destination_rail: { type: string, enum: [ESEWA, KHALTI, IME_PAY, CONNECT_IPS, BANK] }
+      responses:
+        '202':
+          description: Payout queued via Azure Durable Functions
+
+  /bookings/{bookingId}/ratings:
+    post:
+      tags: [TrustWarrantySOS]
+      summary: Submit two-way rating (triggers automatic ranking recalculation loop)
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [overall_stars]
+              properties:
+                overall_stars: { type: integer, minimum: 1, maximum: 5 }
+                sub_tags:
+                  type: array
+                  items: { type: string, enum: [punctuality, workmanship, cleanliness, pricing_transparency, cooperation] }
+                comment: { type: string }
+      responses:
+        '201':
+          description: Rating stored and provider ranking event published to Service Bus
+
+  /bookings/{bookingId}/disputes:
+    post:
+      tags: [TrustWarrantySOS]
+      summary: File 48-hour dispute (immediately freezes Escrow payout)
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, description]
+              properties:
+                category: { type: string, enum: [INCOMPLETE_REPAIR, WORKMANSHIP, OVERCHARGING, NO_SHOW, PROPERTY_DAMAGE] }
+                description: { type: string }
+                evidence_blob_paths: { type: array, items: { type: string } }
+      responses:
+        '201':
+          description: Dispute opened and escrow atomically set to FROZEN_DISPUTE
+
+  /bookings/{bookingId}/warranty-claims:
+    post:
+      tags: [TrustWarrantySOS]
+      summary: File 30-day service (or 6-month project) workmanship warranty claim
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [issue_description]
+              properties:
+                issue_description: { type: string }
+                evidence_blob_paths: { type: array, items: { type: string } }
+      responses:
+        '201':
+          description: Warranty claim queued for 4-hour QA triage
+
+  /bookings/{bookingId}/sos:
+    post:
+      tags: [TrustWarrantySOS]
+      summary: Trigger Priority-0 SOS emergency alert during active job
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lat, lng]
+              properties:
+                lat: { type: number }
+                lng: { type: number }
+                note: { type: string }
+      responses:
+        '201':
+          description: P0 Ops alert raised (<60s SLA) and ACS emergency bridge initiated
+
+  /admin/kyc/{kycId}/review:
+    post:
+      tags: [AdminOps]
+      summary: Admin reviews biometric KYC submission (Approve, Request Resubmission, Reject, Suspend)
+      parameters:
+        - name: kycId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [VERIFIED_ACTIVE, REJECTED_RESUBMIT, SUSPENDED] }
+                academy_skill_score: { type: integer, minimum: 0, maximum: 100 }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Provider KYC status updated; New Verified 14-day grace window activated if approved
+
+  /admin/anti-leakage/flags:
+    get:
+      tags: [AdminOps]
+      summary: List open GPS proximity-cancel & bid-dropoff anti-leakage anomaly flags
+      responses:
+        '200':
+          description: Paginated list of open anti-leakage cases with GPS evidence
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    BookingId:
+      name: bookingId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, maxLength: 120 }
+
+  schemas:
+    KycSubmissionRequest:
+      type: object
+      required:
+        - document_type
+        - document_number
+        - doc_front_blob_path
+        - doc_back_blob_path
+        - selfie_blob_path
+        - azure_liveness_session_id
+        - primary_city
+        - specialties
+      properties:
+        document_type: { type: string, enum: [CITIZENSHIP_NAGARIKTA, NATIONAL_ID_RASTRIYA] }
+        document_number: { type: string }
+        doc_front_blob_path: { type: string }
+        doc_back_blob_path: { type: string }
+        selfie_blob_path: { type: string }
+        azure_liveness_session_id: { type: string }
+        primary_city: { type: string, example: BANEPA }
+        service_radius_km: { type: number, default: 8 }
+        specialties: { type: array, items: { type: string } }
+        linked_bank_name: { type: string }
+        linked_bank_account_no: { type: string }
+        linked_esewa_id: { type: string }
+        pan_number: { type: string }
+
+    CreateBookingRequest:
+      type: object
+      required: [zone_code, category_slug, booking_mode, urgency, address_id, requested_slot_start, requested_slot_end]
+      properties:
+        zone_code: { type: string, example: BANEPA }
+        category_slug: { type: string, example: plumbing }
+        sku_id: { type: string, format: uuid }
+        booking_mode: { type: string, enum: [INSTANT_FIXED, LIVE_BIDDING] }
+        urgency: { type: string, enum: [URGENT_ASAP, SAME_DAY, SCHEDULED] }
+        address_id: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1, default: 1 }
+        issue_description: { type: string }
+        media_blob_paths: { type: array, items: { type: string } }
+        preferred_provider_id: { type: string, format: uuid }
+        requested_slot_start: { type: string, format: date-time }
+        requested_slot_end: { type: string, format: date-time }
+        promo_code: { type: string }
+
+    BookingSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        booking_code: { type: string, example: SPL-261123-00421 }
+        booking_mode: { type: string }
+        status: { type: string }
+        bidding_closes_at: { type: string, format: date-time, nullable: true }
+        estimated_total_npr: { type: number }
+
+    SubmitBidRequest:
+      type: object
+      required: [quoted_labor_npr, estimated_arrival_min, estimated_duration_min]
+      properties:
+        quoted_labor_npr: { type: number, minimum: 100 }
+        estimated_arrival_min: { type: integer, minimum: 5 }
+        estimated_duration_min: { type: integer, minimum: 15 }
+        parts_included: { type: boolean, default: false }
+        notes: { type: string, maxLength: 500 }
+
+    ChangeOrderRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string }
+        additional_labor_npr: { type: number, minimum: 0, default: 0 }
+        spare_parts_items:
+          type: array
+          items:
+            type: object
+            required: [name, qty, mrp_unit_npr, receipt_blob_path]
+            properties:
+              name: { type: string }
+              qty: { type: integer, minimum: 1 }
+              mrp_unit_npr: { type: number, minimum: 0 }
+              receipt_blob_path: { type: string }
