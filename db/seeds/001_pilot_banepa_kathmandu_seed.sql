@@ -69,13 +69,13 @@ WITH sub_bath AS (SELECT id FROM subcategories WHERE slug = 'bathroom-fittings')
      sub_sol  AS (SELECT id FROM subcategories WHERE slug = 'solar-geyser'),
      sub_pump AS (SELECT id FROM subcategories WHERE slug = 'water-pump-motor')
 INSERT INTO service_skus (subcategory_id, slug, title_en, title_ne, pricing_mode, base_labor_npr, unit_label, estimated_duration_min, warranty_days, min_bid_sanity_npr, max_bid_sanity_npr, symptom_keywords)
-SELECT id, 'tap-faucet-leakage-repair', 'Tap & Faucet Leakage Repair', 'धारा चुहिने मर्मत', 'INSTANT_FIXED', 350.00, 'Unit', 45, 30, 250, 1200, ARRAY['tap leaking','kitchen tap','faucet drip','dhara chuhiyo'] FROM sub_bath
+SELECT id, 'tap-faucet-leakage-repair', 'Tap & Faucet Leakage Repair', 'धारा चुहिने मर्मत', 'INSTANT_FIXED'::pricing_mode, 350.00, 'Unit', 45, 30, 250, 1200, ARRAY['tap leaking','kitchen tap','faucet drip','dhara chuhiyo'] FROM sub_bath
 UNION ALL
-SELECT id, 'flush-tank-repair-external', 'Flush Tank Repair (External)', 'फ्लश ट्याङ्की मर्मत', 'INSTANT_FIXED', 650.00, 'Unit', 60, 30, 400, 2000, ARRAY['flush not working','toilet running','flush tank'] FROM sub_bath
+SELECT id, 'flush-tank-repair-external', 'Flush Tank Repair (External)', 'फ्लश ट्याङ्की मर्मत', 'INSTANT_FIXED'::pricing_mode, 650.00, 'Unit', 60, 30, 400, 2000, ARRAY['flush not working','toilet running','flush tank'] FROM sub_bath
 UNION ALL
-SELECT id, 'burst-pipe-emergency-repair', 'Burst / Concealed Pipe Emergency Repair', 'पाइप फुटेको आपतकालीन मर्मत', 'LIVE_BIDDING', 650.00, 'Inspection', 90, 30, 500, 15000, ARRAY['burst pipe','wall seepage','pipe phutyo','water leak wall'] FROM sub_pipe
+SELECT id, 'burst-pipe-emergency-repair', 'Burst / Concealed Pipe Emergency Repair', 'पाइप फुटेको आपतकालीन मर्मत', 'LIVE_BIDDING'::pricing_mode, 650.00, 'Inspection', 90, 30, 500, 15000, ARRAY['burst pipe','wall seepage','pipe phutyo','water leak wall'] FROM sub_pipe
 UNION ALL
-SELECT id, 'solar-water-heater-rod-replace', 'Solar Water Heater Rod Replacement', 'सोलार हिटर रड परिवर्तन', 'HYBRID', 2000.00, 'Unit', 90, 30, 1200, 5000, ARRAY['solar not heating','cold water','solar rod'] FROM sub_sol
+SELECT id, 'solar-water-heater-rod-replace', 'Solar Water Heater Rod Replacement', 'सोलार हिटर रड परिवर्तन', 'HYBRID'::pricing_mode, 2000.00, 'Unit', 90, 30, 1200, 5000, ARRAY['solar not heating','cold water','solar rod'] FROM sub_sol
 UNION ALL
-SELECT id, 'water-pump-motor-repair', 'Water Pump / Pressure Motor Diagnostics & Repair', 'पानी तान्ने मोटर मर्मत', 'LIVE_BIDDING', 650.00, 'Inspection', 90, 30, 500, 12000, ARRAY['pani motor chaldaina','pump humming','no water tank','motor repair'] FROM sub_pump
+SELECT id, 'water-pump-motor-repair', 'Water Pump / Pressure Motor Diagnostics & Repair', 'पानी तान्ने मोटर मर्मत', 'LIVE_BIDDING'::pricing_mode, 650.00, 'Inspection', 90, 30, 500, 12000, ARRAY['pani motor chaldaina','pump humming','no water tank','motor repair'] FROM sub_pump
 ON CONFLICT (slug) DO NOTHING;

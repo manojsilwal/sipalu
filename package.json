@@ -1,0 +1,14 @@
+{
+  "name": "sipalu-monorepo",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "db:up": "docker compose up -d",
+    "db:migrate": "bash -c 'for f in db/migrations/*.sql db/seeds/*.sql; do docker exec -i sipalu-postgres psql -U sipaluadmin -d sipalu -v ON_ERROR_STOP=1 < \"$f\"; done'",
+    "api:build": "npm --prefix services/api run build",
+    "api:start": "npm --prefix services/api run start",
+    "web:build": "pnpm --dir apps/web run build",
+    "web:dev": "pnpm --dir apps/web run dev",
+    "qa:browser": "python3 qa/browser-e2e/run_qa_loop.py"
+  }
+}

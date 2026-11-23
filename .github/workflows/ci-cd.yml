@@ -1,0 +1,74 @@
+name: Sipalu CI/CD — Build, PostGIS Migration Test, Playwright QA & Azure Bicep Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  api-and-migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4-alpine
+        env:
+          POSTGRES_DB: sipalu
+          POSTGRES_USER: sipaluadmin
+          POSTGRES_PASSWORD: ci_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply PostgreSQL + PostGIS Migrations & Pilot Seed
+        env:
+          PGPASSWORD: ci_test_password
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          for f in db/migrations/*.sql db/seeds/*.sql; do
+            psql -h 127.0.0.1 -U sipaluadmin -d sipalu -v ON_ERROR_STOP=1 -f "$f"
+          done
+      - name: Build & Typecheck API
+        working-directory: services/api
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
+  web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build & Typecheck Web App
+        working-directory: apps/web
+        run: |
+          pnpm install
+          pnpm run typecheck
+          pnpm run build
+
+  bicep-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint & Build Azure Bicep Templates
+        run: |
+          az bicep version
+          az bicep build --file infra/bicep/main.bicep

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.env.*
+*.log
+qa/browser-e2e/screenshots/*.png
+qa/browser-e2e/qa-results.json
+.DS_Store
