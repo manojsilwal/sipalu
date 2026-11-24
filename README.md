@@ -14,6 +14,7 @@
 | **06. OpenAPI 3.1 Contract** | Complete Phase 1 Pilot & Core Marketplace REST API specification ready for Azure API Management import | [openapi.yaml](api/openapi.yaml) |
 | **07. Azure Bicep IaC** | Modular Bicep templates (`networking`, `security-observability`, `postgresql`, `redis-servicebus`, `realtime-ai-kyc`, `container-apps`, `edge-apim`) with `pilot-dev`, `pilot-prod`, and `scale-prod` parameter profiles | [main.bicep](infra/bicep/main.bicep) & [infra/README.md](infra/README.md) |
 | **08. Implementation Plan & Real-Browser QA Log** | Milestone plan, 13-point adversarial loophole checklist, and live QA defect/resolution register (`DEF-001`–`DEF-006`) | [05-implementation-and-qa-plan.md](docs/05-implementation-and-qa-plan.md) & [06-qa-defect-and-loophole-log.md](docs/06-qa-defect-and-loophole-log.md) |
+| **09. Azure for Students Free Deploy & Payment Gateways** | `$0/mo` Student Free-Tier Bicep (`student-free.bicep`), 1-command deploy script, unified `Dockerfile.student`, Username/Password auth, and step-by-step **eSewa / Khalti / Fonepay** setup | [07-nepal-payment-gateways-guide.md](docs/07-nepal-payment-gateways-guide.md) & [student-free.bicep](infra/bicep/student-free.bicep) |
 
 ## Unified Platform Architecture Overview
 

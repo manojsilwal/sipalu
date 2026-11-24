@@ -1,0 +1,6 @@
+node_modules
+**/node_modules
+**/dist
+.git
+qa/browser-e2e/screenshots
+*.log

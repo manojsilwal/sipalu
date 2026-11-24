@@ -73,12 +73,37 @@ def main():
         page.on("response", lambda r: server_5xx.append(f"{r.status} {r.url}") if r.status >= 500 else None)
 
         # ---------------------------------------------------------------
-        # FLOW 1: Initial Load, Live WebSocket Sync, Bilingual & Symptom Search
+        # FLOW 1: Initial Load, Username/Password Auth UI, Live WebSocket Sync, Bilingual & Symptom Search
         # ---------------------------------------------------------------
         page.goto(BASE_URL, wait_until="networkidle")
         page.wait_for_selector("#active-user-label:has-text('Aarav')", timeout=10000)
         ws_text = page.locator("#ws-status-badge").inner_text()
-        record("F1.1", "Live WebSocket Sync & Auto OTP Login", "Live Sync ON" in ws_text, ws_text)
+        record("F1.1", "Live WebSocket Sync & Username/Password Auto Login", "Live Sync ON" in ws_text, ws_text)
+
+        # Test real Username/Password Register -> Logout -> Login flow in Browser UI
+        uname = f"banepa_user_{int(time.time())}"
+        page.click("#open-auth-modal-btn")
+        page.click("#switch-register-mode-btn")
+        page.fill("#auth-username", uname)
+        page.fill("#auth-password", "SecretPass#2026")
+        page.fill("#auth-fullname", "Nabin Shrestha")
+        page.click("#auth-submit-btn")
+        page.wait_for_selector("#active-user-label:has-text('Nabin Shrestha')", timeout=6000)
+        page.click("#open-auth-modal-btn")
+        page.click("#logout-btn")
+        page.fill("#auth-username", uname)
+        page.fill("#auth-password", "SecretPass#2026")
+        page.click("#auth-submit-btn")
+        page.wait_for_selector("#active-user-label:has-text('Nabin Shrestha')", timeout=6000)
+        record("F1.0", "Username & Password Register -> Logout -> Login UI Verified", True, f"@{uname} authenticated via scrypt")
+
+        # Verify Nepal Payment Gateway Adapters (eSewa v2 HMAC-SHA256 & Fonepay HMAC-SHA512 & Status)
+        st_gw, body_gw = api_call("GET", "/v1/payments/gateways/status")
+        record("F1.4", "Nepal Payment Gateways (eSewa/Khalti/Fonepay) Status Endpoint Live", st_gw == 200 and "esewa" in body_gw and "khalti" in body_gw and "fonepay" in body_gw, str(body_gw))
+
+        # Switch back to Pilot Customer Aarav via Username/Password
+        page.click("#persona-btn-customer")
+        page.wait_for_selector("#active-user-label:has-text('Aarav')", timeout=6000)
 
         # Bilingual toggle EN -> NE -> EN
         page.click("#locale-toggle-btn")

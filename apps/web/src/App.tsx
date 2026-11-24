@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { apiRequest, DEMO_PERSONAS } from './lib/api';
+import { apiRequest, DEMO_DEFAULT_PASSWORD, DEMO_PERSONAS } from './lib/api';
 import { CustomerPortal } from './portals/CustomerPortal';
 import { ProviderPortal } from './portals/ProviderPortal';
 import { AdminOpsPortal } from './portals/AdminOpsPortal';
@@ -14,6 +14,14 @@ export const App: React.FC = () => {
   const [me, setMe] = useState<any | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [toast, setToast] = useState<{ msg: string; tone: 'ok' | 'danger' | 'warn' } | null>(null);
+
+  // Username & Password Auth Modal State
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [usernameInput, setUsernameInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [fullNameInput, setFullNameInput] = useState('');
+  const [regRole, setRegRole] = useState<'CUSTOMER' | 'PROVIDER'>('CUSTOMER');
 
   const notify = (msg: string, tone: 'ok' | 'danger' | 'warn' = 'ok') => {
     setToast({ msg, tone });
@@ -30,26 +38,69 @@ export const App: React.FC = () => {
     }
   };
 
-  const loginAsPhone = async (phone: string, targetTab?: PortalTab) => {
+  const loginWithCredentials = async (username: string, password: string, targetTab?: PortalTab) => {
     try {
-      await apiRequest('/v1/auth/otp/request', { method: 'POST', body: { phone_e164: phone, locale } });
-      const res = await apiRequest('/v1/auth/otp/verify', {
+      const res = await apiRequest('/v1/auth/login', {
         method: 'POST',
-        body: { phone_e164: phone, otp_code: '123456' },
+        body: { username, password },
       });
       const profile = await apiRequest('/v1/auth/me', { token: res.token });
-      if (targetTab) setActiveTab(targetTab);
+      if (targetTab) {
+        setActiveTab(targetTab);
+      } else if (profile.roles?.includes('SUPER_ADMIN')) {
+        setActiveTab('admin');
+      } else if (profile.roles?.includes('PROVIDER')) {
+        setActiveTab('provider');
+      } else {
+        setActiveTab('customer');
+      }
       setMe(profile);
       setToken(res.token);
+      setAuthModalOpen(false);
       notify(`Signed in as ${res.user.full_name}`, 'ok');
     } catch (err: any) {
       notify(err.message, 'danger');
     }
   };
 
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (authMode === 'login') {
+      await loginWithCredentials(usernameInput, passwordInput);
+      return;
+    }
+    try {
+      const res = await apiRequest('/v1/auth/register', {
+        method: 'POST',
+        body: {
+          username: usernameInput,
+          password: passwordInput,
+          full_name: fullNameInput,
+          role: regRole,
+        },
+      });
+      const profile = await apiRequest('/v1/auth/me', { token: res.token });
+      setActiveTab(regRole === 'PROVIDER' ? 'provider' : 'customer');
+      setMe(profile);
+      setToken(res.token);
+      setAuthModalOpen(false);
+      notify(`Account created! Welcome, ${res.user.full_name}`, 'ok');
+    } catch (err: any) {
+      notify(err.message, 'danger');
+    }
+  };
+
+  const handleLogout = () => {
+    setToken(null);
+    setMe(null);
+    setAuthModalOpen(true);
+    setAuthMode('login');
+    notify('Signed out', 'warn');
+  };
+
   useEffect(() => {
-    // Auto sign-in default Banepa pilot customer on initial load
-    loginAsPhone(DEMO_PERSONAS[0].phone, 'customer');
+    // Auto sign-in default Banepa pilot customer via Username/Password
+    loginWithCredentials(DEMO_PERSONAS[0].username, DEMO_DEFAULT_PASSWORD, 'customer');
 
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${window.location.host}/ws`);
@@ -127,26 +178,142 @@ export const App: React.FC = () => {
             >
               {locale === 'en' ? 'नेपाली (NP)' : 'English (EN)'}
             </button>
+            <button
+              id="open-auth-modal-btn"
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setAuthModalOpen((o) => !o)}
+            >
+              {me ? 'Account / Sign In' : 'Sign In / Register'}
+            </button>
           </div>
         </div>
       </header>
 
-      {/* Pilot Role Switcher Bar for Real Human & QA Walkthroughs */}
+      {/* Username/Password Auth Drawer */}
+      {authModalOpen && (
+        <div
+          id="auth-modal"
+          style={{
+            background: '#ffffff',
+            borderBottom: '1px solid var(--border-subtle)',
+            padding: '1.15rem 1.25rem',
+            boxShadow: 'var(--shadow-sm)',
+          }}
+        >
+          <div style={{ maxWidth: 880, margin: '0 auto' }}>
+            <div className="section-header" style={{ marginBottom: '0.65rem' }}>
+              <h3 style={{ margin: 0 }}>
+                {authMode === 'login' ? 'Sign In with Username & Password' : 'Create Sipalu Account'}
+              </h3>
+              <div className="btn-group" style={{ marginTop: 0 }}>
+                <button
+                  id="switch-login-mode-btn"
+                  type="button"
+                  className={`btn btn-sm ${authMode === 'login' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setAuthMode('login')}
+                >
+                  Sign In
+                </button>
+                <button
+                  id="switch-register-mode-btn"
+                  type="button"
+                  className={`btn btn-sm ${authMode === 'register' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setAuthMode('register')}
+                >
+                  Register
+                </button>
+                {me && (
+                  <button id="logout-btn" type="button" className="btn btn-secondary btn-sm" onClick={handleLogout}>
+                    Sign Out
+                  </button>
+                )}
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setAuthModalOpen(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <form className="form-row" onSubmit={handleAuthSubmit} style={{ alignItems: 'end' }}>
+              <div className="field">
+                <label htmlFor="auth-username">Username</label>
+                <input
+                  id="auth-username"
+                  type="text"
+                  required
+                  placeholder="e.g. aarav, bikram, admin"
+                  value={usernameInput}
+                  onChange={(e) => setUsernameInput(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="auth-password">Password</label>
+                <input
+                  id="auth-password"
+                  type="password"
+                  required
+                  placeholder="Min 6 characters"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                />
+              </div>
+              {authMode === 'register' && (
+                <>
+                  <div className="field">
+                    <label htmlFor="auth-fullname">Full Name</label>
+                    <input
+                      id="auth-fullname"
+                      type="text"
+                      required
+                      placeholder="Your full name"
+                      value={fullNameInput}
+                      onChange={(e) => setFullNameInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="auth-role">Account Role</label>
+                    <select
+                      id="auth-role"
+                      value={regRole}
+                      onChange={(e) => setRegRole(e.target.value as 'CUSTOMER' | 'PROVIDER')}
+                    >
+                      <option value="CUSTOMER">Homeowner / Customer</option>
+                      <option value="PROVIDER">Service Technician / Provider</option>
+                    </select>
+                  </div>
+                </>
+              )}
+              <button id="auth-submit-btn" type="submit" className="btn btn-accent">
+                {authMode === 'login' ? 'Sign In' : 'Create Account'}
+              </button>
+            </form>
+            <div style={{ fontSize: '0.78rem', color: 'var(--ink-muted)', marginTop: '0.5rem' }}>
+              Pilot Demo Accounts (Password: <code>Sipalu@2026</code>): <code>aarav</code> (Customer),{' '}
+              <code>bikram</code> (Verified Plumber), <code>raju</code> (Applicant), <code>sita</code> (B2B Manager),{' '}
+              <code>admin</code> (Ops Admin)
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pilot Role Switcher Bar */}
       <div className="persona-bar">
         <div className="persona-bar-inner">
           <div>
             <strong>Active Session:</strong>{' '}
-            <span id="active-user-label">{me ? `${me.full_name} (${me.phone_e164})` : 'Signing in...'}</span>
+            <span id="active-user-label">
+              {me ? `${me.full_name} (@${me.username || me.phone_e164})` : 'Not signed in'}
+            </span>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
-            <span style={{ color: 'var(--ink-muted)' }}>Quick OTP Sign-In:</span>
+            <span style={{ color: 'var(--ink-muted)' }}>Demo Sign-In:</span>
             {DEMO_PERSONAS.map((p) => (
               <button
                 key={p.key}
                 id={`persona-btn-${p.key}`}
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => loginAsPhone(p.phone, p.portal)}
+                onClick={() => loginWithCredentials(p.username, DEMO_DEFAULT_PASSWORD, p.portal)}
               >
                 {p.label}
               </button>

@@ -1,0 +1,74 @@
+name: Build & Publish Sipalu Container + Deploy to Azure for Students
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      azure_location:
+        description: 'Azure Region (e.g. southeastasia, eastasia, centralindia, eastus2)'
+        required: false
+        default: 'southeastasia'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push-ghcr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry (Free $0/mo)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push Unified Student Image (Web + API + WS + Auto-Migrations)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.student
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+  deploy-to-azure-student:
+    needs: build-and-push-ghcr
+    if: ${{ secrets.AZURE_CREDENTIALS != '' && secrets.SIPALU_PG_ADMIN_PASSWORD != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy Sipalu to Azure for Students Free Tier
+        env:
+          LOCATION: ${{ github.event.inputs.azure_location || 'southeastasia' }}
+          PG_PASS: ${{ secrets.SIPALU_PG_ADMIN_PASSWORD }}
+          JWT_SEC: ${{ secrets.SIPALU_JWT_SECRET }}
+          ESEWA_CODE: ${{ secrets.ESEWA_PRODUCT_CODE || 'EPAYTEST' }}
+          ESEWA_KEY: ${{ secrets.ESEWA_SECRET_KEY || '8gBm/:&EnhH.1/q' }}
+          KHALTI_KEY: ${{ secrets.KHALTI_SECRET_KEY || '' }}
+          FONEPAY_KEY: ${{ secrets.FONEPAY_SECRET_KEY || '' }}
+        run: |
+          az group create --name rg-sipalu-student --location "$LOCATION"
+          az deployment group create \
+            --resource-group rg-sipalu-student \
+            --template-file infra/bicep/student-free.bicep \
+            --parameters \
+              location="$LOCATION" \
+              containerImage="ghcr.io/${{ github.repository }}:${{ github.sha }}" \
+              pgAdminPassword="$PG_PASS" \
+              jwtSecret="${JWT_SEC:-sipalu-auto-jwt-secret-change-in-secrets-2026}" \
+              esewaProductCode="$ESEWA_CODE" \
+              esewaSecretKey="$ESEWA_KEY" \
+              khaltiSecretKey="$KHALTI_KEY" \
+              fonepaySecretKey="$FONEPAY_KEY"

@@ -40,10 +40,12 @@ export async function apiRequest<T = any>(
   return data as T;
 }
 
+export const DEMO_DEFAULT_PASSWORD = 'Sipalu@2026';
+
 export const DEMO_PERSONAS = [
-  { key: 'customer', label: 'Customer (Aarav · Banepa)', phone: '+9779800000002', portal: 'customer' as const },
-  { key: 'provider', label: 'Verified Plumber (Bikram)', phone: '+9779800000003', portal: 'provider' as const },
-  { key: 'applicant', label: 'New Tech Applicant (Raju)', phone: '+9779800000005', portal: 'provider' as const },
-  { key: 'b2b', label: 'Facility Mgr (Sita · B2B)', phone: '+9779800000004', portal: 'b2b' as const },
-  { key: 'admin', label: 'Ops Admin (Maya)', phone: '+9779800000001', portal: 'admin' as const },
+  { key: 'customer', label: 'Customer (aarav)', username: 'aarav', portal: 'customer' as const },
+  { key: 'provider', label: 'Verified Plumber (bikram)', username: 'bikram', portal: 'provider' as const },
+  { key: 'applicant', label: 'New Tech Applicant (raju)', username: 'raju', portal: 'provider' as const },
+  { key: 'b2b', label: 'Facility Mgr (sita)', username: 'sita', portal: 'b2b' as const },
+  { key: 'admin', label: 'Ops Admin (admin)', username: 'admin', portal: 'admin' as const },
 ];

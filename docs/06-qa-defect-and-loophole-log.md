@@ -14,6 +14,7 @@ This document records every bug, missing feature, edge case, and security/busine
 | **Cycle 3 — Real-Browser Audit #3** | 2026-11-23 | Flows 1–5 + Loopholes L1–L4, L7, L13 | 2 (`DEF-004`, `DEF-005`) | 2 / 2 | **FIXED → Cycle 4** |
 | **Cycle 4 — Full 31-Check Audit #4** | 2026-11-23 | All 4 Portals + Epics 1–7 + SOP-01–10 + Loopholes L1–L13 | 1 (`DEF-006`) | 1 / 1 | **30/31 → FIXED** |
 | **Cycle 5 — Final Production Gate** | 2026-11-23 | Full 33-check suite (+ Instant 2h Payout UI + 30d Warranty Re-Fix Dispatch + Zero-404/Spurious-403 Gate) | **0 open defects** | **6 / 6** | **33/33 PASS ✓** |
+| **Cycle 6 — Username/Password Auth + Nepal Gateways + Student Docker Image** | 2026-11-23 | Basic Username/Password Register→Logout→Login UI, eSewa/Khalti/Fonepay adapters, & `Dockerfile.student` container build | 1 (`DEF-007`) | **7 / 7** | **35/35 PASS ✓** |
 
 ---
 
@@ -66,6 +67,14 @@ This document records every bug, missing feature, edge case, and security/busine
 - **Root Cause:** `App.tsx` called `setToken(res.token)` before `setActiveTab(targetTab)`, causing `AdminOpsPortal`'s `useEffect([token])` to fire `/v1/admin/*` with the newly switched non-admin token prior to unmount.
 - **Fix Applied:** Added inline SVG favicon in `apps/web/index.html`, switched `activeTab` before updating `token` in `App.tsx`, and added an explicit admin RBAC role guard in `AdminOpsPortal.tsx`.
 - **Retest:** **PASS** in Cycle 5 (**Zero `404`s, zero spurious `403`s, zero JS/page errors, zero `5xx`s**).
+
+### `DEF-007` — `Dockerfile.student` Build Failure on `apps/web/pnpm-workspace.yaml`
+- **Severity:** High (Would have broken GitHub Actions GHCR build & Azure Student deploy)
+- **Found In:** Cycle 6 local Docker build verification (`docker build -f Dockerfile.student`)
+- **Symptom:** `pnpm run build` inside Docker failed with `ERROR packages field missing or empty`.
+- **Root Cause:** `apps/web/pnpm-workspace.yaml` generated during local install lacked a `packages` field under pnpm 10 inside Docker.
+- **Fix Applied:** Switched `Dockerfile.student` and `.github/workflows/ci-cd.yml` `web-build` to clean `npm install` + `npm run build` and added `.dockerignore`.
+- **Retest:** **PASS** — `sipalu-student:test` built cleanly and passed full container smoke test (Web SPA + `/health` + `AUTO_MIGRATE=true` + `/v1/auth/login`).
 
 ---
 

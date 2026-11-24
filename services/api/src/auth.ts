@@ -1,8 +1,25 @@
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import type { Request, Response, NextFunction } from 'express';
 import { pool } from './db.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'sipalu-dev-jwt-secret-rotate-via-keyvault';
+
+export function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `scrypt:${salt}:${derived}`;
+}
+
+export function verifyPassword(password: string, storedHash: string | null | undefined): boolean {
+  if (!storedHash || !storedHash.startsWith('scrypt:')) return false;
+  const [, salt, keyHex] = storedHash.split(':');
+  if (!salt || !keyHex) return false;
+  const derived = crypto.scryptSync(password, salt, 64);
+  const storedBuf = Buffer.from(keyHex, 'hex');
+  if (derived.length !== storedBuf.length) return false;
+  return crypto.timingSafeEqual(derived, storedBuf);
+}
 
 export interface AuthUser {
   id: string;

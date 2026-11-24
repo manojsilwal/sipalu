@@ -2,12 +2,144 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { z } from 'zod';
 import { pool, withTransaction } from '../db.js';
-import { parsePgTextArray, requireAnyRole, requireAuth, signToken } from '../auth.js';
+import {
+  hashPassword,
+  parsePgTextArray,
+  requireAnyRole,
+  requireAuth,
+  signToken,
+  verifyPassword,
+} from '../auth.js';
 import { ensureProviderLedgerAccounts } from '../ledger.js';
 
 export const authAndKycRouter = Router();
 
-// In-memory OTP store backed by TTL (in Azure prod, backed by Redis)
+// Basic Username + Password Registration (Active default for Pilot / Azure Student launch)
+authAndKycRouter.post('/auth/register', async (req, res) => {
+  const parsed = z
+    .object({
+      username: z
+        .string()
+        .min(3)
+        .max(40)
+        .regex(/^[a-zA-Z0-9._-]+$/, 'Username may contain letters, numbers, dot, underscore, hyphen'),
+      password: z.string().min(6).max(128),
+      full_name: z.string().min(2).max(150),
+      phone_e164: z
+        .string()
+        .regex(/^\+977\d{10}$/, 'Must be valid Nepal +977 phone')
+        .optional(),
+      role: z.enum(['CUSTOMER', 'PROVIDER']).default('CUSTOMER'),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+  const d = parsed.data;
+  const phone = d.phone_e164 || `+97798${Math.floor(10000000 + Math.random() * 89999999)}`;
+  const passwordHash = hashPassword(d.password);
+
+  const user = await withTransaction(async (client) => {
+    const dup = await client.query(
+      `SELECT id FROM users WHERE LOWER(username) = LOWER($1) OR phone_e164 = $2`,
+      [d.username, phone]
+    );
+    if (dup.rows[0]) {
+      throw Object.assign(new Error('Username or phone number already registered'), { statusCode: 409 });
+    }
+    const created = await client.query(
+      `INSERT INTO users (username, password_hash, phone_e164, full_name, roles)
+       VALUES ($1, $2, $3, $4, ARRAY[$5]::user_role[])
+       RETURNING id, username, phone_e164, email, full_name, roles`,
+      [d.username.trim(), passwordHash, phone, d.full_name.trim(), d.role]
+    );
+    const u = created.rows[0];
+    if (d.role === 'PROVIDER') {
+      await client.query(
+        `INSERT INTO provider_profiles (user_id, primary_city, kyc_status, availability_state)
+         VALUES ($1, 'BANEPA', 'PENDING_SUBMISSION', 'OFFLINE')
+         ON CONFLICT (user_id) DO NOTHING`,
+        [u.id]
+      );
+    } else {
+      // Seed a default Banepa address so new customers can book immediately
+      await client.query(
+        `INSERT INTO user_addresses (user_id, label, city, ward_no, tole_neighborhood, exact_address_line, exact_location, masked_location, is_default)
+         VALUES ($1, 'Home (Banepa)', 'Banepa', 7, 'Tindobato Area', 'Banepa Ward 7, Kavre',
+           ST_SetSRID(ST_MakePoint(85.5214, 27.6298), 4326)::geography,
+           ST_SetSRID(ST_MakePoint(85.5250, 27.6325), 4326)::geography, TRUE)`,
+        [u.id]
+      );
+    }
+    return u;
+  });
+
+  const roles = parsePgTextArray(user.roles);
+  const token = signToken({
+    id: user.id,
+    phone_e164: user.phone_e164,
+    full_name: user.full_name,
+    roles,
+  });
+  res.status(201).json({
+    token,
+    user: { id: user.id, username: user.username, phone_e164: user.phone_e164, full_name: user.full_name, roles },
+  });
+});
+
+// Basic Username + Password Login
+authAndKycRouter.post('/auth/login', async (req, res) => {
+  const parsed = z
+    .object({
+      username: z.string().min(2).max(120),
+      password: z.string().min(1).max(128),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+
+  const { rows } = await pool.query(
+    `SELECT id, username, password_hash, phone_e164, email, full_name, roles, is_active, is_anonymized
+     FROM users
+     WHERE LOWER(username) = LOWER($1) OR LOWER(email::text) = LOWER($1) OR phone_e164 = $1
+     LIMIT 1`,
+    [parsed.data.username.trim()]
+  );
+  const user = rows[0];
+  if (!user || !verifyPassword(parsed.data.password, user.password_hash)) {
+    res.status(401).json({ error: 'Invalid username or password' });
+    return;
+  }
+  if (!user.is_active || user.is_anonymized) {
+    res.status(403).json({ error: 'Account inactive or anonymized' });
+    return;
+  }
+
+  const roles = parsePgTextArray(user.roles);
+  const token = signToken({
+    id: user.id,
+    phone_e164: user.phone_e164,
+    full_name: user.full_name,
+    roles,
+  });
+
+  res.json({
+    token,
+    user: {
+      id: user.id,
+      username: user.username,
+      phone_e164: user.phone_e164,
+      email: user.email,
+      full_name: user.full_name,
+      roles,
+    },
+  });
+});
+
+// In-memory OTP store (kept optional for Phase 2 SMS OTP upgrade)
 const otpStore = new Map<string, { code: string; expiresAt: number }>();
 
 authAndKycRouter.post('/auth/otp/request', async (req, res) => {
@@ -101,7 +233,7 @@ authAndKycRouter.post('/auth/otp/verify', async (req, res) => {
 // List demo personas in non-production for quick human/QA role switching
 authAndKycRouter.get('/auth/me', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT u.id, u.phone_e164, u.email, u.full_name, u.preferred_locale, u.roles,
+    `SELECT u.id, u.username, u.phone_e164, u.email, u.full_name, u.preferred_locale, u.roles,
             p.tier_code, p.kyc_status, p.availability_state, p.primary_city, p.visibility_score,
             p.lifetime_completed_jobs, p.rolling_avg_rating, p.cash_jobs_enabled,
             p.financial_account_verified, p.linked_bank_name, p.linked_esewa_id,

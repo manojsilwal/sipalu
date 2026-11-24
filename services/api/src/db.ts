@@ -1,4 +1,7 @@
+import fs from 'fs';
+import path from 'path';
 import pg from 'pg';
+import { hashPassword } from './auth.js';
 
 const { Pool } = pg;
 
@@ -6,6 +9,10 @@ export const pool = new Pool({
   connectionString:
     process.env.DATABASE_URL ||
     'postgresql://sipaluadmin:sipalu_local_dev_password@localhost:5432/sipalu',
+  ssl:
+    process.env.PGSSLMODE === 'require' || process.env.DATABASE_URL?.includes('azure.com')
+      ? { rejectUnauthorized: false }
+      : undefined,
 });
 
 export async function withTransaction<T>(
@@ -26,42 +33,96 @@ export async function withTransaction<T>(
   }
 }
 
+/**
+ * Idempotently applies SQL migrations & pilot seed on first boot (for zero-touch Azure Student deploy).
+ */
+export async function runAutoMigrations(): Promise<void> {
+  const migrationsDir = process.env.MIGRATIONS_DIR || path.resolve(process.cwd(), '../../db/migrations');
+  const seedsDir = process.env.SEEDS_DIR || path.resolve(process.cwd(), '../../db/seeds');
+  if (!fs.existsSync(migrationsDir)) return;
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS _schema_migrations (
+      filename VARCHAR(180) PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  const files = fs
+    .readdirSync(migrationsDir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
+
+  for (const file of files) {
+    const check = await pool.query(`SELECT 1 FROM _schema_migrations WHERE filename = $1`, [file]);
+    if (check.rowCount && check.rowCount > 0) continue;
+    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+    try {
+      await pool.query(sql);
+    } catch (err: unknown) {
+      const pgErr = err as { code?: string };
+      // Ignore already-exists codes (42710 type exists, 42P07 relation exists) if migrating existing DB
+      if (pgErr.code !== '42710' && pgErr.code !== '42P07') {
+        throw err;
+      }
+    }
+    await pool.query(`INSERT INTO _schema_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING`, [file]);
+    console.log(`[AUTO-MIGRATE] Applied ${file}`);
+  }
+
+  if (fs.existsSync(seedsDir)) {
+    const seedFiles = fs
+      .readdirSync(seedsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort();
+    for (const file of seedFiles) {
+      const sql = fs.readFileSync(path.join(seedsDir, file), 'utf-8');
+      await pool.query(sql);
+    }
+  }
+}
+
 export async function ensureDemoFixtures(): Promise<void> {
+  const defaultPassHash = hashPassword(process.env.DEMO_USER_PASSWORD || 'Sipalu@2026');
+
   await withTransaction(async (client) => {
-    // Promo code SIPALU50 (10% off up to Rs 300)
     await client.query(`
       INSERT INTO promo_codes (code, discount_type, discount_value, max_discount_npr, min_order_npr, usage_limit_total, usage_limit_per_user, valid_from, valid_until)
       VALUES ('SIPALU50', 'PERCENT', 10, 300, 300, 10000, 5, NOW() - INTERVAL '1 day', NOW() + INTERVAL '365 days')
       ON CONFLICT (code) DO NOTHING
     `);
 
-    // Seed Pilot Accounts (Admin, Customer in Banepa, Verified Provider in Banepa, Unverified Provider, B2B Manager)
     const fixtures = [
       {
+        username: 'admin',
         phone: '+9779800000001',
         email: 'admin@sipalu.com',
         name: 'Maya Shrestha (Ops Admin)',
         roles: ['OPS_DISPATCHER', 'KYC_REVIEWER', 'FINANCE_ADMIN', 'GRIEVANCE_OFFICER', 'SUPER_ADMIN'],
       },
       {
+        username: 'aarav',
         phone: '+9779800000002',
         email: 'aarav@example.com',
         name: 'Aarav Thapa',
         roles: ['CUSTOMER'],
       },
       {
+        username: 'bikram',
         phone: '+9779800000003',
         email: 'bikram.plumber@example.com',
         name: 'Bikram Tamang (Verified Plumber)',
         roles: ['PROVIDER'],
       },
       {
+        username: 'sita',
         phone: '+9779800000004',
         email: 'sita.facility@example.com',
         name: 'Sita Gurung (Facility Manager)',
         roles: ['CUSTOMER', 'BUSINESS_ADMIN'],
       },
       {
+        username: 'raju',
         phone: '+9779800000005',
         email: 'newtech@example.com',
         name: 'Raju Karki (New Applicant)',
@@ -71,14 +132,15 @@ export async function ensureDemoFixtures(): Promise<void> {
 
     for (const f of fixtures) {
       await client.query(
-        `INSERT INTO users (phone_e164, email, full_name, roles)
-         VALUES ($1, $2, $3, $4::user_role[])
-         ON CONFLICT (phone_e164) DO NOTHING`,
-        [f.phone, f.email, f.name, f.roles]
+        `INSERT INTO users (username, password_hash, phone_e164, email, full_name, roles)
+         VALUES ($1, $2, $3, $4, $5, $6::user_role[])
+         ON CONFLICT (phone_e164) DO UPDATE
+           SET username = COALESCE(users.username, EXCLUDED.username),
+               password_hash = COALESCE(users.password_hash, EXCLUDED.password_hash)`,
+        [f.username, defaultPassHash, f.phone, f.email, f.name, f.roles]
       );
     }
 
-    // Seed Customer Banepa Address (exact + ~500m masked centroid)
     const custRes = await client.query(`SELECT id FROM users WHERE phone_e164 = '+9779800000002'`);
     if (custRes.rows[0]) {
       const custId = custRes.rows[0].id;
@@ -98,7 +160,6 @@ export async function ensureDemoFixtures(): Promise<void> {
       }
     }
 
-    // Seed Verified Provider (Bikram) with Financial Linking + Float Wallet + Ledger Accounts
     const provRes = await client.query(`SELECT id FROM users WHERE phone_e164 = '+9779800000003'`);
     if (provRes.rows[0]) {
       const provId = provRes.rows[0].id;
@@ -121,7 +182,6 @@ export async function ensureDemoFixtures(): Promise<void> {
         [provId]
       );
 
-      // Ensure Provider Ledger & Float Wallet
       const floatCode = `PROV_FLOAT:${provId}`;
       const payCode = `PROV_PAYABLE:${provId}`;
       const floatAcct = await client.query(
@@ -145,7 +205,6 @@ export async function ensureDemoFixtures(): Promise<void> {
       );
     }
 
-    // Seed Unverified Provider (Raju) for KYC Queue & Loophole L1 testing
     const unvRes = await client.query(`SELECT id FROM users WHERE phone_e164 = '+9779800000005'`);
     if (unvRes.rows[0]) {
       const unvId = unvRes.rows[0].id;
