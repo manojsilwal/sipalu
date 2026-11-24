@@ -28,7 +28,12 @@ This guide walks you step-by-step through:
    chmod +x infra/scripts/deploy-azure-student.sh
    ./infra/scripts/deploy-azure-student.sh southeastasia rg-sipalu-student
    ```
-3. On first boot, `AUTO_MIGRATE=true` automatically creates all PostGIS extensions, runs `001`–`006` SQL migrations, seeds Banepa & Kathmandu Valley SKUs, and creates your demo login accounts (`aarav`, `bikram`, `raju`, `sita`, `admin` — Password: **`Sipalu@2026`**).
+3. On first boot, `AUTO_MIGRATE=true` automatically creates all PostGIS extensions, runs `001`–`006` SQL migrations, seeds Banepa & Kathmandu Valley SKUs, and creates your **Sipalu Test Accounts** (Password: **`Sipalu@2026`**):
+   - **`manoj`** — Manoj Silwal (Sipalu Founder & Super Admin + Customer)
+   - **`sipalu_customer`** — Manoj Silwal (Sipalu Customer)
+   - **`sipalu_expert`** — Sipalu Verified Expert (linked eSewa/Khalti/Bank + NPR 1,000 Float)
+   - Plus pilot fixtures: `aarav`, `bikram`, `raju`, `sita`, `admin`
+   - All **3 Sandbox Payment Gateways (eSewa UAT, Khalti Sandbox, Fonepay UAT)** are active immediately out-of-the-box!
 
 ### Option B: Automatic GitHub Actions Deploy on Every Push to `main`
 1. Create an Azure Service Principal scoped to your resource group:

@@ -439,9 +439,42 @@ def main():
         page.wait_for_selector("#toast-notification:has-text('Net Rs 475')", timeout=6000)
         record("F7.3", "Provider Instant 2h Payout Disbursed (Gross Rs 500, Fee Rs 25, Net Rs 475)", True, "SETTLED")
 
-        # Re-check Double-Entry Ledger Balance after Payout
-        page.click("#persona-btn-admin")
+        # ---------------------------------------------------------------
+        # FLOW 8: Manoj Silwal & Sipalu Test Accounts + ALL 3 Sandbox Payment Gateways (eSewa, Khalti, Fonepay) + L14 Forged Signature Probe
+        # ---------------------------------------------------------------
+        # Sign in as Manoj's personal Sipalu Customer account (sipalu_customer)
+        page.click("#persona-btn-sipalu_customer")
+        page.wait_for_selector("#active-user-label:has-text('Manoj Silwal (Sipalu Customer)')", timeout=6000)
+
+        for idx, (gw_name, btn_cls, slot_hr) in enumerate([
+            ("ESEWA", ".sandbox-esewa-btn", "22"),
+            ("KHALTI", ".sandbox-khalti-btn", "26"),
+            ("FONEPAY", ".sandbox-fonepay-btn", "30"),
+        ]):
+            page.click("#select-sku-tap-faucet-leakage-repair")
+            page.fill("#booking-slot-offset", slot_hr)
+            page.click("#submit-booking-btn")
+            page.wait_for_selector("#toast-notification:has-text('SCHEDULED_LOCKED')", timeout=6000)
+            page.locator(btn_cls).first.click()
+            page.wait_for_selector("#sandbox-checkout-panel", timeout=6000)
+            if gw_name == "ESEWA":
+                page.screenshot(path=f"{SHOT_DIR}/06-sandbox-esewa-checkout.png", full_page=False)
+            page.click("#complete-sandbox-payment-btn")
+            page.wait_for_selector(f"#toast-notification:has-text('{gw_name} Sandbox verified')", timeout=6000)
+            record(f"F8.{idx + 1}", f"{gw_name} Sandbox Signed Checkout -> Webhook HMAC Verify -> Double-Entry Settle", True, f"{gw_name} SETTLED_CLOSED")
+
+        # L14 Security Probe: Tampered eSewa HMAC-SHA256 & Fonepay HMAC-SHA512 MUST be rejected (HTTP 401)
+        bad_esewa_b64 = "eyJ0cmFuc2FjdGlvbl9jb2RlIjoiRkFLRSIsInN0YXR1cyI6IkNPTVBMRVRFIiwic2lnbmVkX2ZpZWxkX25hbWVzIjoic3RhdHVzIiwic2lnbmF0dXJlIjoiRkFLRV9TSUcifQ=="
+        st_bad_esw, _ = api_call("POST", "/v1/payments/webhooks/esewa", body={"data": bad_esewa_b64})
+        st_bad_kh, _ = api_call("POST", "/v1/payments/webhooks/khalti", body={"pidx": "khalti_sbx_fake123", "booking_id": "00000000-0000-0000-0000-000000000001", "sandbox_signature": "forged_sig"})
+        st_bad_fp, _ = api_call("POST", "/v1/payments/webhooks/fonepay", body={"PRN": "SPLFAKE", "PID": "NBQM", "PS": "true", "RC": "0", "UID": "1", "BC": "500.00", "INI": "00", "P_AMT": "successful", "DV": "forged_dv", "booking_id": "00000000-0000-0000-0000-000000000001"})
+        record("L14", "Forged eSewa/Khalti/Fonepay Webhook Signatures Strictly Rejected (HTTP 401)", st_bad_esw == 401 and st_bad_kh == 401 and st_bad_fp == 401, f"esewa={st_bad_esw}, khalti={st_bad_kh}, fonepay={st_bad_fp}")
+
+        # Verify Manoj Founder/Admin account sign-in & balanced ledger across all 3 sandbox gateways!
+        page.click("#persona-btn-manoj")
+        page.wait_for_selector("#active-user-label:has-text('Manoj Silwal (Sipalu Founder)')", timeout=6000)
         page.wait_for_selector("#ledger-integrity-status:has-text('BALANCED')", timeout=6000)
+        record("F8.4", "Manoj Silwal (Founder/Admin) Login & Double-Entry Ledger Balanced After All 3 Gateways", True, "BALANCED ✓")
         page.screenshot(path=f"{SHOT_DIR}/05-admin-final-green.png", full_page=False)
 
         browser.close()

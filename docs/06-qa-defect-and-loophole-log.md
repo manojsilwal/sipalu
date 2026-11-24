@@ -15,6 +15,7 @@ This document records every bug, missing feature, edge case, and security/busine
 | **Cycle 4 — Full 31-Check Audit #4** | 2026-11-23 | All 4 Portals + Epics 1–7 + SOP-01–10 + Loopholes L1–L13 | 1 (`DEF-006`) | 1 / 1 | **30/31 → FIXED** |
 | **Cycle 5 — Final Production Gate** | 2026-11-23 | Full 33-check suite (+ Instant 2h Payout UI + 30d Warranty Re-Fix Dispatch + Zero-404/Spurious-403 Gate) | **0 open defects** | **6 / 6** | **33/33 PASS ✓** |
 | **Cycle 6 — Username/Password Auth + Nepal Gateways + Student Docker Image** | 2026-11-23 | Basic Username/Password Register→Logout→Login UI, eSewa/Khalti/Fonepay adapters, & `Dockerfile.student` container build | 1 (`DEF-007`) | **7 / 7** | **35/35 PASS ✓** |
+| **Cycle 7 — Full 3-Gateway Sandbox (eSewa/Khalti/Fonepay) + Manoj/Sipalu Accounts + L14** | 2026-11-23 | Interactive eSewa/Khalti/Fonepay Sandbox Checkout → HMAC-SHA256/512 webhook settlement, Forged signature 401 check (`L14`), & `manoj`/`sipalu_customer`/`sipalu_expert` accounts | **0 open defects** | **7 / 7** | **40/40 PASS ✓** |
 
 ---
 

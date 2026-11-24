@@ -28,6 +28,109 @@ export const CustomerPortal: React.FC<Props> = ({ token, me, locale, notify, ref
   const [otpInput, setOtpInput] = useState('4829');
   const [invoiceView, setInvoiceView] = useState<any | null>(null);
   const [maskedCallInfo, setMaskedCallInfo] = useState<any | null>(null);
+  const [sandboxSession, setSandboxSession] = useState<{
+    gateway: 'esewa' | 'khalti' | 'fonepay';
+    bookingId: string;
+    bookingCode: string;
+    data: any;
+  } | null>(null);
+
+  const handleOpenSandboxGateway = async (booking: any, gateway: 'esewa' | 'khalti' | 'fonepay') => {
+    try {
+      const origin = window.location.origin;
+      const amt = Math.max(10, Number(booking.final_total_npr || 500));
+      let data: any;
+      if (gateway === 'esewa') {
+        data = await apiRequest('/v1/payments/gateways/esewa/sign', {
+          method: 'POST',
+          token,
+          body: {
+            booking_id: booking.id,
+            amount_npr: amt,
+            success_url: `${origin}/?gw_callback=esewa`,
+            failure_url: `${origin}/?gw_callback=esewa_failed`,
+          },
+        });
+      } else if (gateway === 'khalti') {
+        data = await apiRequest('/v1/payments/gateways/khalti/initiate', {
+          method: 'POST',
+          token,
+          body: {
+            booking_id: booking.id,
+            amount_npr: amt,
+            return_url: `${origin}/?gw_callback=khalti&booking_id=${booking.id}`,
+            website_url: origin,
+            purchase_order_name: `Sipalu ${booking.booking_code}`,
+          },
+        });
+      } else {
+        data = await apiRequest('/v1/payments/gateways/fonepay/sign', {
+          method: 'POST',
+          token,
+          body: {
+            booking_id: booking.id,
+            amount_npr: amt,
+            return_url: `${origin}/?gw_callback=fonepay&booking_id=${booking.id}`,
+          },
+        });
+      }
+      setSandboxSession({ gateway, bookingId: booking.id, bookingCode: booking.booking_code, data });
+      notify(`${gateway.toUpperCase()} Sandbox checkout initialized (${data.mode})`, 'ok');
+    } catch (err: any) {
+      notify(err.message, 'danger');
+    }
+  };
+
+  const handleCompleteSandboxCallback = async () => {
+    if (!sandboxSession) return;
+    try {
+      const { gateway, bookingId, data } = sandboxSession;
+      let res: any;
+      if (gateway === 'esewa') {
+        res = await apiRequest('/v1/payments/webhooks/esewa', {
+          method: 'POST',
+          body: { data: data.simulated_callback_base64, booking_id: bookingId },
+        });
+      } else if (gateway === 'khalti') {
+        res = await apiRequest('/v1/payments/webhooks/khalti', {
+          method: 'POST',
+          body: data.simulated_callback,
+        });
+      } else {
+        res = await apiRequest('/v1/payments/webhooks/fonepay', {
+          method: 'POST',
+          body: data.simulated_callback,
+        });
+      }
+      notify(
+        `${gateway.toUpperCase()} Sandbox verified (${res.gateway})! Settled Rs ${res.payment?.amount_npr} & 30-day warranty active.`,
+        'ok'
+      );
+      setSandboxSession(null);
+      await fetchBookings();
+      await refreshMe();
+    } catch (err: any) {
+      notify(err.message, 'danger');
+    }
+  };
+
+  const handleLaunchExternalEsewa = () => {
+    if (!sandboxSession || sandboxSession.gateway !== 'esewa') return;
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = sandboxSession.data.action_url;
+    form.target = '_blank';
+    for (const [k, v] of Object.entries(sandboxSession.data.form_fields || {})) {
+      const inp = document.createElement('input');
+      inp.type = 'hidden';
+      inp.name = k;
+      inp.value = String(v);
+      form.appendChild(inp);
+    }
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+  };
 
   const fetchCatalog = async (qStr = query, zStr = zoneCode) => {
     try {
@@ -481,6 +584,67 @@ export const CustomerPortal: React.FC<Props> = ({ token, me, locale, notify, ref
               </div>
             )}
 
+            {sandboxSession && (
+              <div className="alert-banner alert-warn" id="sandbox-checkout-panel">
+                <div className="section-header" style={{ marginBottom: '0.35rem' }}>
+                  <strong>
+                    {sandboxSession.gateway.toUpperCase()} Sandbox Checkout · {sandboxSession.bookingCode} ({sandboxSession.data.mode})
+                  </strong>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setSandboxSession(null)}>
+                    Close
+                  </button>
+                </div>
+                <div style={{ fontSize: '0.8rem', lineHeight: 1.45 }}>
+                  {sandboxSession.gateway === 'esewa' && (
+                    <>
+                      <div>Endpoint: <code>{sandboxSession.data.action_url}</code> · Product: <code>{sandboxSession.data.form_fields?.product_code}</code></div>
+                      <div>HMAC-SHA256 Signature: <code>{String(sandboxSession.data.form_fields?.signature || '').slice(0, 28)}...</code></div>
+                      <div>Test Wallet: <code>9806800001</code> / Pass: <code>Nepal@123</code> / MPIN: <code>1122</code> / OTP: <code>987654</code></div>
+                    </>
+                  )}
+                  {sandboxSession.gateway === 'khalti' && (
+                    <>
+                      <div>PIDX: <code>{sandboxSession.data.pidx}</code> · Amount: <code>{sandboxSession.data.amount_paisa} paisa</code></div>
+                      <div>Test Wallet: <code>9800000000</code> / MPIN: <code>1111</code> / OTP: <code>987654</code></div>
+                    </>
+                  )}
+                  {sandboxSession.gateway === 'fonepay' && (
+                    <>
+                      <div>PID: <code>{sandboxSession.data.params?.PID}</code> · PRN: <code>{sandboxSession.data.params?.PRN}</code></div>
+                      <div>Dynamic QR: <code>{sandboxSession.data.qr_string}</code></div>
+                      <div>HMAC-SHA512 DV: <code>{String(sandboxSession.data.params?.DV || '').slice(0, 28)}...</code></div>
+                    </>
+                  )}
+                </div>
+                <div className="btn-group">
+                  <button
+                    id="complete-sandbox-payment-btn"
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleCompleteSandboxCallback}
+                  >
+                    Verify Signed Sandbox Callback &amp; Settle Ledger
+                  </button>
+                  {sandboxSession.gateway === 'esewa' && (
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={handleLaunchExternalEsewa}>
+                      Open Official eSewa UAT Portal
+                    </button>
+                  )}
+                  {sandboxSession.gateway === 'khalti' && sandboxSession.data.payment_url && (
+                    <a
+                      href={sandboxSession.data.payment_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-secondary btn-sm"
+                      style={{ textDecoration: 'none' }}
+                    >
+                      Open Khalti Sandbox Page
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="item-list">
               {bookings.length === 0 && <p style={{ color: 'var(--ink-muted)' }}>No bookings yet. Create one on the left!</p>}
               {bookings.map((b) => {
@@ -563,8 +727,14 @@ export const CustomerPortal: React.FC<Props> = ({ token, me, locale, notify, ref
                       )}
                       {b.assigned_provider_id && ['SCHEDULED_LOCKED', 'IN_PROGRESS', 'COMPLETED_PENDING_CONFIRM'].includes(b.status) && b.escrow_status !== 'HELD' && (
                         <>
-                          <button type="button" className="btn btn-primary btn-sm pay-esewa-btn" onClick={() => handlePay(b.id, 'ESEWA', false)}>
-                            Pay eSewa
+                          <button type="button" className="btn btn-primary btn-sm sandbox-esewa-btn" onClick={() => handleOpenSandboxGateway(b, 'esewa')}>
+                            eSewa Sandbox
+                          </button>
+                          <button type="button" className="btn btn-primary btn-sm sandbox-khalti-btn" onClick={() => handleOpenSandboxGateway(b, 'khalti')}>
+                            Khalti Sandbox
+                          </button>
+                          <button type="button" className="btn btn-primary btn-sm sandbox-fonepay-btn" onClick={() => handleOpenSandboxGateway(b, 'fonepay')}>
+                            Fonepay Sandbox
                           </button>
                           <button type="button" className="btn btn-secondary btn-sm fund-escrow-btn" onClick={() => handlePay(b.id, 'ESEWA', true)}>
                             Fund Escrow

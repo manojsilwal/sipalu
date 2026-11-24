@@ -43,6 +43,9 @@ export async function apiRequest<T = any>(
 export const DEMO_DEFAULT_PASSWORD = 'Sipalu@2026';
 
 export const DEMO_PERSONAS = [
+  { key: 'manoj', label: 'Manoj Silwal (Founder/Admin)', username: 'manoj', portal: 'admin' as const },
+  { key: 'sipalu_customer', label: 'Sipalu Customer (manoj)', username: 'sipalu_customer', portal: 'customer' as const },
+  { key: 'sipalu_expert', label: 'Sipalu Expert (manoj)', username: 'sipalu_expert', portal: 'provider' as const },
   { key: 'customer', label: 'Customer (aarav)', username: 'aarav', portal: 'customer' as const },
   { key: 'provider', label: 'Verified Plumber (bikram)', username: 'bikram', portal: 'provider' as const },
   { key: 'applicant', label: 'New Tech Applicant (raju)', username: 'raju', portal: 'provider' as const },

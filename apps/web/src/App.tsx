@@ -100,7 +100,25 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     // Auto sign-in default Banepa pilot customer via Username/Password
-    loginWithCredentials(DEMO_PERSONAS[0].username, DEMO_DEFAULT_PASSWORD, 'customer');
+    loginWithCredentials('aarav', DEMO_DEFAULT_PASSWORD, 'customer');
+
+    // Auto-handle external eSewa / Khalti / Fonepay sandbox return URL callbacks if present
+    const qs = new URLSearchParams(window.location.search);
+    const gwCb = qs.get('gw_callback');
+    if (gwCb === 'esewa' && qs.get('data')) {
+      apiRequest('/v1/payments/webhooks/esewa', { method: 'POST', body: { data: qs.get('data') } })
+        .then(() => notify('eSewa Sandbox payment verified & settled in double-entry ledger!', 'ok'))
+        .catch((e) => notify(`eSewa callback error: ${e.message}`, 'danger'));
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (gwCb === 'fonepay' && qs.get('PRN') && qs.get('DV')) {
+      apiRequest('/v1/payments/webhooks/fonepay', {
+        method: 'POST',
+        body: Object.fromEntries(qs.entries()),
+      })
+        .then(() => notify('Fonepay Sandbox payment verified & settled!', 'ok'))
+        .catch((e) => notify(`Fonepay callback error: ${e.message}`, 'danger'));
+      window.history.replaceState({}, '', window.location.pathname);
+    }
 
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${window.location.host}/ws`);
@@ -288,9 +306,9 @@ export const App: React.FC = () => {
               </button>
             </form>
             <div style={{ fontSize: '0.78rem', color: 'var(--ink-muted)', marginTop: '0.5rem' }}>
-              Pilot Demo Accounts (Password: <code>Sipalu@2026</code>): <code>aarav</code> (Customer),{' '}
-              <code>bikram</code> (Verified Plumber), <code>raju</code> (Applicant), <code>sita</code> (B2B Manager),{' '}
-              <code>admin</code> (Ops Admin)
+              Sipalu Test Accounts (Password: <code>Sipalu@2026</code>): <code>manoj</code> (Founder/Admin),{' '}
+              <code>sipalu_customer</code>, <code>sipalu_expert</code>, <code>aarav</code>, <code>bikram</code>,{' '}
+              <code>raju</code>, <code>sita</code>, <code>admin</code>
             </div>
           </div>
         </div>

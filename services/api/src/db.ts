@@ -94,6 +94,27 @@ export async function ensureDemoFixtures(): Promise<void> {
 
     const fixtures = [
       {
+        username: 'manoj',
+        phone: '+9779800000010',
+        email: 'manoj@sipalu.com',
+        name: 'Manoj Silwal (Sipalu Founder)',
+        roles: ['CUSTOMER', 'OPS_DISPATCHER', 'KYC_REVIEWER', 'FINANCE_ADMIN', 'GRIEVANCE_OFFICER', 'SUPER_ADMIN'],
+      },
+      {
+        username: 'sipalu_customer',
+        phone: '+9779800000011',
+        email: 'customer@sipalu.com',
+        name: 'Manoj Silwal (Sipalu Customer)',
+        roles: ['CUSTOMER'],
+      },
+      {
+        username: 'sipalu_expert',
+        phone: '+9779800000012',
+        email: 'expert@sipalu.com',
+        name: 'Sipalu Expert (Manoj)',
+        roles: ['PROVIDER'],
+      },
+      {
         username: 'admin',
         phone: '+9779800000001',
         email: 'admin@sipalu.com',
@@ -141,68 +162,77 @@ export async function ensureDemoFixtures(): Promise<void> {
       );
     }
 
-    const custRes = await client.query(`SELECT id FROM users WHERE phone_e164 = '+9779800000002'`);
-    if (custRes.rows[0]) {
-      const custId = custRes.rows[0].id;
-      const addrCheck = await client.query(`SELECT id FROM user_addresses WHERE user_id = $1`, [custId]);
-      if (addrCheck.rowCount === 0) {
-        await client.query(
-          `INSERT INTO user_addresses (user_id, label, city, ward_no, tole_neighborhood, exact_address_line, exact_location, masked_location, is_default)
-           VALUES (
-             $1, 'Home (Banepa)', 'Banepa', 7, 'Tindobato Chowk Area',
-             'House #42, Araniko Marg, Behind Banepa Bus Park, Ward 7',
-             ST_SetSRID(ST_MakePoint(85.5214, 27.6298), 4326)::geography,
-             ST_SetSRID(ST_MakePoint(85.5250, 27.6325), 4326)::geography,
-             TRUE
-           )`,
-          [custId]
-        );
+    // Seed Banepa/KTM addresses for customer test accounts (aarav, manoj, sipalu_customer)
+    for (const phone of ['+9779800000002', '+9779800000010', '+9779800000011']) {
+      const custRes = await client.query(`SELECT id FROM users WHERE phone_e164 = $1`, [phone]);
+      if (custRes.rows[0]) {
+        const custId = custRes.rows[0].id;
+        const addrCheck = await client.query(`SELECT id FROM user_addresses WHERE user_id = $1`, [custId]);
+        if (addrCheck.rowCount === 0) {
+          await client.query(
+            `INSERT INTO user_addresses (user_id, label, city, ward_no, tole_neighborhood, exact_address_line, exact_location, masked_location, is_default)
+             VALUES (
+               $1, 'Home (Banepa)', 'Banepa', 7, 'Tindobato Chowk Area',
+               'House #42, Araniko Marg, Behind Banepa Bus Park, Ward 7',
+               ST_SetSRID(ST_MakePoint(85.5214, 27.6298), 4326)::geography,
+               ST_SetSRID(ST_MakePoint(85.5250, 27.6325), 4326)::geography,
+               TRUE
+             )`,
+            [custId]
+          );
+        }
       }
     }
 
-    const provRes = await client.query(`SELECT id FROM users WHERE phone_e164 = '+9779800000003'`);
-    if (provRes.rows[0]) {
-      const provId = provRes.rows[0].id;
-      await client.query(
-        `INSERT INTO provider_profiles (
-           user_id, tier_code, kyc_status, availability_state, primary_city, service_radius_km,
-           home_base_location, last_known_location, last_location_at, years_experience, specialties,
-           linked_bank_name, linked_bank_account_no, linked_esewa_id, financial_account_verified,
-           lifetime_completed_jobs, rolling_avg_rating, visibility_score, cash_jobs_enabled, pan_number
-         )
-         VALUES (
-           $1, 'VERIFIED', 'VERIFIED_ACTIVE', 'AVAILABLE', 'BANEPA', 12.0,
-           ST_SetSRID(ST_MakePoint(85.5200, 27.6310), 4326)::geography,
-           ST_SetSRID(ST_MakePoint(85.5200, 27.6310), 4326)::geography,
-           NOW(), 6, ARRAY['plumbing','water_pump','geyser_solar'],
-           'Nabil Bank', '01201017500991', '9800000003', TRUE,
-           42, 4.80, 88.50, TRUE, '609112233'
-         )
-         ON CONFLICT (user_id) DO NOTHING`,
-        [provId]
-      );
+    // Seed Verified Provider accounts (bikram & sipalu_expert) with Financial Linking + Float Wallet
+    for (const provSpec of [
+      { phone: '+9779800000003', esewa: '9806800001', khalti: '9800000000', bankAcct: '01201017500991', floatAmt: 600.0, payAmt: 2400.0, visScore: 88.5 },
+      { phone: '+9779800000012', esewa: '9806800001', khalti: '9800000000', bankAcct: '01201017500999', floatAmt: 1000.0, payAmt: 3500.0, visScore: 86.0 },
+    ]) {
+      const provRes = await client.query(`SELECT id FROM users WHERE phone_e164 = $1`, [provSpec.phone]);
+      if (provRes.rows[0]) {
+        const provId = provRes.rows[0].id;
+        await client.query(
+          `INSERT INTO provider_profiles (
+             user_id, tier_code, kyc_status, availability_state, primary_city, service_radius_km,
+             home_base_location, last_known_location, last_location_at, years_experience, specialties,
+             linked_bank_name, linked_bank_account_no, linked_esewa_id, linked_khalti_id, financial_account_verified,
+             lifetime_completed_jobs, rolling_avg_rating, visibility_score, cash_jobs_enabled, pan_number
+           )
+           VALUES (
+             $1, 'VERIFIED', 'VERIFIED_ACTIVE', 'AVAILABLE', 'BANEPA', 12.0,
+             ST_SetSRID(ST_MakePoint(85.5200, 27.6310), 4326)::geography,
+             ST_SetSRID(ST_MakePoint(85.5200, 27.6310), 4326)::geography,
+             NOW(), 6, ARRAY['plumbing','water_pump','geyser_solar'],
+             'Nabil Bank', $2, $3, $4, TRUE,
+             42, 4.80, $5, TRUE, '609112233'
+           )
+           ON CONFLICT (user_id) DO NOTHING`,
+          [provId, provSpec.bankAcct, provSpec.esewa, provSpec.khalti, provSpec.visScore]
+        );
 
-      const floatCode = `PROV_FLOAT:${provId}`;
-      const payCode = `PROV_PAYABLE:${provId}`;
-      const floatAcct = await client.query(
-        `INSERT INTO ledger_accounts (code, account_type, owner_user_id, balance_npr)
-         VALUES ($1, 'LIABILITY', $2, 600.00)
-         ON CONFLICT (code) DO UPDATE SET code = EXCLUDED.code
-         RETURNING id`,
-        [floatCode, provId]
-      );
-      await client.query(
-        `INSERT INTO ledger_accounts (code, account_type, owner_user_id, balance_npr)
-         VALUES ($1, 'LIABILITY', $2, 2400.00)
-         ON CONFLICT (code) DO NOTHING`,
-        [payCode, provId]
-      );
-      await client.query(
-        `INSERT INTO provider_float_wallets (provider_user_id, ledger_account_id, current_float_npr, is_cash_paused)
-         VALUES ($1, $2, 600.00, FALSE)
-         ON CONFLICT (provider_user_id) DO NOTHING`,
-        [provId, floatAcct.rows[0].id]
-      );
+        const floatCode = `PROV_FLOAT:${provId}`;
+        const payCode = `PROV_PAYABLE:${provId}`;
+        const floatAcct = await client.query(
+          `INSERT INTO ledger_accounts (code, account_type, owner_user_id, balance_npr)
+           VALUES ($1, 'LIABILITY', $2, $3)
+           ON CONFLICT (code) DO UPDATE SET code = EXCLUDED.code
+           RETURNING id`,
+          [floatCode, provId, provSpec.floatAmt]
+        );
+        await client.query(
+          `INSERT INTO ledger_accounts (code, account_type, owner_user_id, balance_npr)
+           VALUES ($1, 'LIABILITY', $2, $3)
+           ON CONFLICT (code) DO NOTHING`,
+          [payCode, provId, provSpec.payAmt]
+        );
+        await client.query(
+          `INSERT INTO provider_float_wallets (provider_user_id, ledger_account_id, current_float_npr, is_cash_paused)
+           VALUES ($1, $2, $3, FALSE)
+           ON CONFLICT (provider_user_id) DO NOTHING`,
+          [provId, floatAcct.rows[0].id, provSpec.floatAmt]
+        );
+      }
     }
 
     const unvRes = await client.query(`SELECT id FROM users WHERE phone_e164 = '+9779800000005'`);
